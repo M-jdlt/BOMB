@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Compte à rebours Bombe</title>
+<style>
+@keyframes blink {
+  0%,50%,100%{background-color:#0f0f0f;}
+  25%,75%{background-color:red;}
+}
+@keyframes pulse {
+  0%,100%{transform:scale(1); color:#00ff00;}
+  50%{transform:scale(1.1); color:yellow;}
+}
+@keyframes shake {
+  0%,100%{transform:translate(0,0);}
+  10%,30%,50%,70%,90%{transform:translate(-8px,8px);}
+  20%,40%,60%,80%{transform:translate(8px,-8px);}
+}
+
+body {
+  margin:0;
+  font-family:'Orbitron',sans-serif;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  align-items:center;
+  height:100vh;
+  background-color:#0f0f0f;
+  color:#00ff00;
+  overflow:hidden;
+  text-align:center;
+}
+
+#timer {
+  font-size:6rem;
+  margin:20px 0;
+  animation:pulse 1s infinite;
+}
+
+input {
+  font-size:1.2rem;
+  padding:12px;
+  width:80%;
+  max-width:400px;
+  border:2px solid #00ff00;
+  border-radius:5px;
+  background:#111;
+  color:#00ff00;
+  text-align:center;
+  margin-bottom:20px;
+}
+
+button {
+  font-size:1.3rem;
+  padding:12px 25px;
+  cursor:pointer;
+  background-color:#00ff00;
+  border:none;
+  color:#111;
+  border-radius:8px;
+  transition:0.2s;
+  margin-bottom:10px;
+  z-index:10;              /* ✅ keep above overlays */
+  position:relative;
+  touch-action: manipulation; /* ✅ ensures touch works */
+}
+button:hover{background-color:#00cc00;}
+
+.warning-light{
+  position:absolute;
+  top:0;
+  width:100%;
+  height:10px;
+  background:red;
+  animation:blink 1s infinite;
+  z-index:-1;
+  pointer-events:none; /* ✅ don’t block taps */
+}
+
+.explosion-flash{
+  position:fixed;
+  top:0; left:0;
+  width:100%; height:100%;
+  background:red;
+  opacity:0;
+  pointer-events:none; /* ✅ don’t block taps */
+  z-index:999;
+}
+
+.shake{animation:shake 0.4s infinite;}
+
+#message{
+  margin-top:10px;
+  font-size:1.2rem;
+  color:yellow;
+  padding:0 10px;
+}
+
+#popupMessage {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0);
+  font-size: 3rem;
+  color: #00ff00;
+  background: rgba(0,0,0,0.8);
+  padding: 25px 35px;
+  border: 3px solid #00ff00;
+  border-radius: 15px;
+  text-align: center;
+  z-index: 1000;
+  transition: transform 0.5s ease, opacity 0.5s ease;
+  opacity: 0;
+}
+#popupMessage.show {
+  transform: translate(-50%, -50%) scale(1);
+  opacity: 1;
+}
+
+/* 📱 Mobile adjustments */
+@media (max-width: 600px) {
+  #timer { font-size: 3.5rem; }
+  input, button { width: 90%; font-size: 1rem; }
+  #popupMessage { font-size: 2rem; padding: 15px 25px; }
+}
+</style>
+</head>
+<body>
+
+<div class="warning-light"></div>
+<div class="explosion-flash" id="explosionFlash"></div>
+
+<h1>🚨 COMPTE À REBOURS DE LA BOMBE 🚨</h1>
+
+<button id="startBtn">🎬 START MISSION</button>
+
+<div id="timer">60:00</div>
+<input type="text" id="codeInput" placeholder="Entrez le code 4 chiffres pour désamorcer">
+<button id="defuseBtn">DÉSAMORCER</button>
+
+<div id="message"></div>
+<div id="popupMessage"></div>
+
+<script>
+let totalTime = 60*60; // 60 minutes
+let timerDisplay = document.getElementById('timer');
+let messageDiv = document.getElementById('message');
+let explosionFlash = document.getElementById('explosionFlash');
+let popupMessage = document.getElementById('popupMessage');
+let interval;
+const correctCode = '6421';
+let audioCtx;
+
+// ✅ Tick sound
+function playTick(duration=50){
+    if(!audioCtx) return;
+    let osc = audioCtx.createOscillator();
+    let gain = audioCtx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(1000, audioCtx.currentTime);
+    gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + duration/1000);
+}
+
+// ✅ Success chime
+function playChime(){
+    if(!audioCtx) return;
+    const now = audioCtx.currentTime;
+    const freqs = [523.25, 659.25, 783.99, 1046.5]; // C5 E5 G5 C6
+    freqs.forEach((f,i)=>{
+        let osc = audioCtx.createOscillator();
+        let gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(f, now + i*0.15);
+        gain.gain.setValueAtTime(0.2, now + i*0.15);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + i*0.15 + 0.3);
+        osc.connect(gain).connect(audioCtx.destination);
+        osc.start(now + i*0.15);
+        osc.stop(now + i*0.15 + 0.3);
+    });
+}
+
+// ✅ Deep boom sound
+function playExplosion(){
+    if(!audioCtx) return;
+    const now = audioCtx.currentTime;
+    let osc = audioCtx.createOscillator();
+    let gain = audioCtx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(60, now);
+    gain.gain.setValueAtTime(0.8, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 1.0);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(now);
+    osc.stop(now + 1.0);
+}
+
+// ✅ Pop-up
+function showPopup(text, color='#00ff00'){
+    popupMessage.textContent = text;
+    popupMessage.style.color = color;
+    popupMessage.classList.add('show');
+    setTimeout(() => popupMessage.classList.remove('show'), 3000);
+}
+
+// ✅ Start timer
+function startTimer(){
+    if(interval) return;
+    messageDiv.textContent = "⏳ Compte à rebours lancé !";
+    interval = setInterval(()=>{
+        let minutes = Math.floor(totalTime/60);
+        let seconds = totalTime%60;
+        timerDisplay.textContent = `${String(minutes).padStart(2,'0')}:${String(seconds).padStart(2,'0')}`;
+        if(seconds === 0 && totalTime > 0) playTick();
+        if(totalTime <= 10 && totalTime > 0){
+            playTick();
+            timerDisplay.style.color = (totalTime % 2 === 0) ? 'red' : 'yellow';
+            document.querySelector('.warning-light').style.animationDuration = '0.3s';
+        } else {
+            timerDisplay.style.color = '#00ff00';
+            document.querySelector('.warning-light').style.animationDuration = '1s';
+        }
+        totalTime--;
+        if(totalTime < 0){
+            clearInterval(interval);
+            explodeBomb();
+        }
+    },1000);
+}
+
+// ✅ Defuse
+function stopTimer(){
+    let input = document.getElementById('codeInput').value.trim();
+    if(input === correctCode){
+        clearInterval(interval);
+        messageDiv.textContent = "✅ Bombe désamorcée avec succès !";
+        document.body.classList.remove('shake');
+        showPopup("✅ Bombe désamorcée !", "#00ff00");
+        playChime();
+        tryVibrate([200,100,200]);
+    } else {
+        messageDiv.textContent = "❌ Code incorrect, bombe toujours active !";
+        showPopup("❌ Code incorrect !", "red");
+    }
+}
+
+// ✅ Explosion
+function explodeBomb(){
+    explosionFlash.style.opacity = 1;
+    document.body.classList.add('shake');
+    showPopup("💥 BOOM ! Le temps est écoulé !", "red");
+    playExplosion();
+    tryVibrate([500,200,500]);
+    messageDiv.textContent = "💥 BOOM ! Le temps est écoulé - mission échouée !";
+    setTimeout(()=>{ explosionFlash.style.opacity = 0; document.body.classList.remove('shake'); },600);
+}
+
+// ✅ Vibration fallback
+function tryVibrate(pattern){
+    if('vibrate' in navigator){
+        navigator.vibrate(pattern);
+    } else {
+        document.body.classList.add('shake');
+        setTimeout(()=>document.body.classList.remove('shake'), pattern[0] || 500);
+    }
+}
+
+// ✅ Start button (fixes audio blocking)
+document.getElementById('startBtn').addEventListener('click', function(){
+    if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    audioCtx.resume(); // ✅ enables audio on iPhone
+    startTimer();
+    this.disabled = true;
+});
+
+// ✅ Defuse button
+document.getElementById('defuseBtn').addEventListener('click', stopTimer);
+</script>
+
+</body>
+</html>
